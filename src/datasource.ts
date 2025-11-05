@@ -1,5 +1,17 @@
 import { DataSource } from 'typeorm';
 
+// 本番環境ではビルド済みのJavaScriptファイル、開発環境ではTypeScriptファイルを使用
+const isProduction = process.env.NODE_ENV === 'production';
+
+const entities = process.env.DB_TYPEORM_ENTITIES || 
+  (isProduction ? 'dist/**/*.entity.js' : 'src/**/*.entity.ts');
+
+const migrations = process.env.DB_TYPEORM_MIGRATIONS || 
+  (isProduction ? 'dist/migrations/**/*.js' : 'src/migrations/**/*.ts');
+
+const subscribers = process.env.DB_TYPEORM_SUBSCRIBERS || 
+  (isProduction ? 'dist/subscribers/**/*.js' : 'src/subscribers/**/*.ts');
+
 export default new DataSource({
   migrationsTableName: 'migrations',
   type: 'sqlite',
@@ -7,9 +19,7 @@ export default new DataSource({
   synchronize: false,
   migrationsRun: true,
   logging: ['query', 'error', 'log'],
-  entities: [process.env.DB_TYPEORM_ENTITIES || 'src/**/*.entity.ts'],
-  migrations: [process.env.DB_TYPEORM_MIGRATIONS || 'src/migrations/**/*.ts'],
-  subscribers: [
-    process.env.DB_TYPEORM_SUBSCRIBERS || 'src/subscribers/**/*.ts',
-  ],
+  entities: [entities],
+  migrations: [migrations],
+  subscribers: [subscribers],
 });

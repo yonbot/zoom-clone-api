@@ -42,6 +42,25 @@ sudo apt-get update
 sudo apt-get install git
 ```
 
+### ビルドツールのインストール（必須）
+
+**重要**: `sqlite3`などのネイティブモジュールをビルドするために、以下のツールが必要です。
+`npm install --production`を実行する前に、必ずインストールしてください。
+
+```bash
+# ビルドツール（make, gcc, g++など）をインストール
+sudo apt-get update
+sudo apt-get install -y build-essential
+
+# Python（node-gypが使用）をインストール
+sudo apt-get install -y python3
+
+# その他の必要なツール
+sudo apt-get install -y make
+```
+
+**エラーが発生した場合**: `npm error gyp ERR! stack Error: not found: make` というエラーが出た場合は、上記のコマンドを実行してから再度 `npm install --production` を実行してください。
+
 ## 3. プロジェクトの配置
 
 ### 方法A: Gitリポジトリからクローンする場合
@@ -72,10 +91,16 @@ cd ~/apps/zoom-clone-api
 
 ## 4. 依存関係のインストール
 
+**重要**: ビルドにはTypeScriptと型定義ファイル（devDependencies）が必要です。
+そのため、まずは全ての依存関係をインストールします。
+
 ```bash
 cd ~/apps/zoom-clone-api
-npm install --production
+npm install
 ```
+
+**注意**: `npm install --production`は使用しないでください。
+ビルド後に不要なdevDependenciesを削除したい場合は、ビルド完了後に`npm prune --production`を実行できます。
 
 ## 5. 環境変数の設定
 
@@ -263,6 +288,42 @@ pm2 flush
    sudo netstat -tulpn | grep 8888
    ```
 
+#### `SyntaxError: Cannot use import statement outside a module` エラー
+
+このエラーは、TypeORMがTypeScriptファイル（`src/**/*.entity.ts`）を読み込もうとしている場合に発生します。
+
+**原因**: 
+- 本番環境で環境変数`NODE_ENV=production`が設定されていない
+- または、`.env`ファイルが正しく読み込まれていない
+
+**解決方法**:
+
+1. **`.env`ファイルを確認**:
+   ```bash
+   cat .env
+   ```
+   `NODE_ENV=production`が設定されているか確認してください。
+
+2. **PM2を再起動**:
+   ```bash
+   pm2 delete zoom-clone-api
+   pm2 start ecosystem.config.js --env production
+   ```
+
+3. **ビルドが完了しているか確認**:
+   ```bash
+   ls -la dist/modules/users/
+   ```
+   `user.entity.js`ファイルが存在することを確認してください。
+
+4. **コードを再ビルド**:
+   ```bash
+   npm run build
+   pm2 restart zoom-clone-api
+   ```
+
+**注意**: 最新のコードでは、`NODE_ENV=production`が設定されていれば自動的に`dist`配下のファイルを使用するようになっています。
+
 ### データベースエラーが発生する場合
 
 1. データディレクトリの権限を確認:
@@ -273,6 +334,86 @@ pm2 flush
 2. マイグレーションを再実行:
    ```bash
    npm run migration:run
+   ```
+
+### npm installでエラーが発生する場合
+
+#### `npm error gyp ERR! stack Error: not found: make`
+
+このエラーは、ネイティブモジュール（`sqlite3`など）をビルドするために必要なビルドツールが不足している場合に発生します。
+
+**解決方法**:
+```bash
+# ビルドツールをインストール
+sudo apt-get update
+sudo apt-get install -y build-essential python3 make
+
+# インストール後、再度実行
+npm install
+```
+
+#### `npm run build`で型定義エラーが発生する場合
+
+エラー例: `error TS7016: Could not find a declaration file for module 'express'`
+
+このエラーは、devDependencies（TypeScriptと型定義ファイル）がインストールされていない場合に発生します。
+
+**解決方法**:
+```bash
+# 全ての依存関係（devDependenciesを含む）をインストール
+npm install
+
+# その後、再度ビルド
+npm run build
+```
+
+**重要**: ビルドにはdevDependenciesが必要です。`npm install --production`はビルド前に使用しないでください。
+
+#### `npm ERR! code EACCES` または権限エラー
+
+npmのグローバルパッケージのインストールで権限エラーが発生する場合：
+
+```bash
+# npmのグローバルディレクトリの権限を修正
+mkdir ~/.npm-global
+npm config set prefix '~/.npm-global'
+echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### npm run buildでエラーが発生する場合
+
+#### TypeScript型定義エラー
+
+エラー例: 
+```
+error TS7016: Could not find a declaration file for module 'express'
+Try `npm i --save-dev @types/express`
+```
+
+**原因**: devDependenciesがインストールされていない
+
+**解決方法**:
+```bash
+# 全ての依存関係をインストール（devDependenciesを含む）
+npm install
+
+# ビルドを再実行
+npm run build
+```
+
+#### その他のビルドエラー
+
+1. TypeScriptのバージョンを確認:
+   ```bash
+   npx tsc --version
+   ```
+
+2. node_modulesをクリーンアップして再インストール:
+   ```bash
+   rm -rf node_modules package-lock.json
+   npm install
+   npm run build
    ```
 
 ### メモリ不足が発生する場合
@@ -286,9 +427,11 @@ pm2 flush
 ```bash
 # 1. 最新のコードを取得（Git使用の場合）
 git pull origin main
+# または master ブランチの場合
+git pull origin master
 
-# 2. 依存関係を更新
-npm install --production
+# 2. 依存関係を更新（devDependenciesを含む）
+npm install
 
 # 3. ビルド
 npm run build
@@ -298,6 +441,9 @@ npm run migration:run
 
 # 5. PM2で再起動
 pm2 restart zoom-clone-api
+
+# 6. （オプション）ビルド後、不要なdevDependenciesを削除する場合
+# npm prune --production
 ```
 
 ## セキュリティのベストプラクティス
