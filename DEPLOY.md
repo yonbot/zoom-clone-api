@@ -1119,6 +1119,230 @@ npm run build
    sudo systemctl start nginx
    ```
 
+## 13. Docker Composeの自動起動設定
+
+VPS再起動時にdocker-composeでymlファイルを読み込んで自動起動させる設定です。
+
+### 方法1: systemdサービスを作成（推奨）
+
+#### ステップ1: systemdサービスファイルを作成
+
+```bash
+# n8n用のsystemdサービスファイルを作成
+sudo nano /etc/systemd/system/n8n-docker.service
+```
+
+以下の内容を設定（`/path/to/n8n`を実際のdocker-compose.ymlがあるディレクトリに置き換えてください）：
+
+```ini
+[Unit]
+Description=n8n Docker Compose
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/path/to/n8n
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
+User=root
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**注意**: 
+- `WorkingDirectory`をdocker-compose.ymlがあるディレクトリに設定
+- `docker compose`（スペース区切り）を使用している場合: `/usr/bin/docker compose`
+- `docker-compose`（ハイフン区切り）を使用している場合: `/usr/local/bin/docker-compose`
+- どちらを使うか確認: `which docker-compose` または `which docker compose`
+
+#### ステップ2: docker-compose.ymlのパスを指定する場合
+
+docker-compose.ymlが特定のパスにある場合：
+
+```bash
+sudo nano /etc/systemd/system/n8n-docker.service
+```
+
+```ini
+[Unit]
+Description=n8n Docker Compose
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker compose -f /path/to/n8n/docker-compose.yml up -d
+ExecStop=/usr/bin/docker compose -f /path/to/n8n/docker-compose.yml down
+TimeoutStartSec=0
+User=root
+
+[Install]
+WantedBy=multi-user.target
+```
+
+#### ステップ3: サービスを有効化
+
+```bash
+# systemdの設定を再読み込み
+sudo systemctl daemon-reload
+
+# サービスを有効化（自動起動を有効にする）
+sudo systemctl enable n8n-docker.service
+
+# サービスを起動（テスト）
+sudo systemctl start n8n-docker.service
+
+# 状態を確認
+sudo systemctl status n8n-docker.service
+```
+
+#### ステップ4: 動作確認
+
+```bash
+# サービスが正常に起動したか確認
+sudo systemctl status n8n-docker.service
+
+# コンテナが起動しているか確認
+docker ps
+
+# ログを確認
+sudo journalctl -u n8n-docker.service -f
+```
+
+### 方法2: docker-compose.ymlでrestartポリシーを設定
+
+docker-compose.ymlに`restart: unless-stopped`または`restart: always`を追加：
+
+```yaml
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n
+    restart: unless-stopped  # または restart: always
+    ports:
+      - "5678:5678"
+    # ... その他の設定
+```
+
+ただし、この方法ではdocker-composeコマンド自体が自動実行されないため、**方法1（systemdサービス）の方が確実**です。
+
+### 方法3: Dockerの再起動ポリシーを使用（簡易版）
+
+```bash
+# 既存のコンテナに再起動ポリシーを設定
+docker update --restart unless-stopped <container_name>
+
+# 例
+docker update --restart unless-stopped n8n
+```
+
+ただし、この方法はdocker-composeで管理されているコンテナには適用されない場合があります。
+
+### 複数のdocker-composeプロジェクトを自動起動する場合
+
+複数のdocker-composeプロジェクト（例: n8nとtraefik）を自動起動する場合：
+
+```bash
+# 各プロジェクト用にsystemdサービスを作成
+sudo nano /etc/systemd/system/n8n-docker.service
+sudo nano /etc/systemd/system/traefik-docker.service
+
+# すべてを有効化
+sudo systemctl enable n8n-docker.service
+sudo systemctl enable traefik-docker.service
+
+# または、1つのサービスで複数のプロジェクトを管理
+sudo nano /etc/systemd/system/all-docker-compose.service
+```
+
+複数プロジェクトを1つのサービスで管理する例：
+
+```ini
+[Unit]
+Description=All Docker Compose Services
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c 'cd /path/to/n8n && docker compose up -d && cd /path/to/traefik && docker compose up -d'
+ExecStop=/bin/bash -c 'cd /path/to/n8n && docker compose down && cd /path/to/traefik && docker compose down'
+TimeoutStartSec=0
+User=root
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### トラブルシューティング
+
+```bash
+# サービスが起動しない場合、ログを確認
+sudo journalctl -u n8n-docker.service -n 50
+
+# サービスの状態を確認
+sudo systemctl status n8n-docker.service
+
+# 手動で実行してエラーを確認
+cd /path/to/n8n
+docker compose up -d
+
+# systemdの設定を再読み込み
+sudo systemctl daemon-reload
+
+# サービスを再起動
+sudo systemctl restart n8n-docker.service
+```
+
+### よくある問題と解決方法
+
+1. **`docker compose`コマンドが見つからない**:
+   ```bash
+   # パスを確認
+   which docker compose
+   which docker-compose
+   
+   # サービスファイルのExecStartで正しいパスを指定
+   # /usr/bin/docker compose または /usr/local/bin/docker-compose
+   ```
+
+2. **権限エラー**:
+   ```bash
+   # サービスファイルでUserを確認
+   # rootユーザーで実行するか、dockerグループにユーザーを追加
+   sudo usermod -aG docker $USER
+   ```
+
+3. **Dockerサービスが起動する前に実行される**:
+   ```bash
+   # サービスファイルに以下を追加
+   Requires=docker.service
+   After=docker.service
+   ```
+
+### 確認方法
+
+```bash
+# 1. サービスが有効化されているか確認
+sudo systemctl is-enabled n8n-docker.service
+
+# 2. 再起動してテスト
+sudo reboot
+
+# 3. 再起動後、コンテナが起動しているか確認
+docker ps
+
+# 4. サービスログを確認
+sudo journalctl -u n8n-docker.service
+```
+
 ## 更新手順
 
 コードを更新した場合の手順：
