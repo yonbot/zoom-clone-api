@@ -9,7 +9,7 @@ import { Server } from 'socket.io';
 import meetingController from './modules/meetings/meeting.controller';
 
 require('dotenv').config();
-const port = 8888;
+const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 8888;
 const app: Express = express();
 const httpServer = createServer(app);
 
